@@ -328,8 +328,9 @@
         try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
       }
 
-      var statusLayer = new GraphicsLayer({ title:"Klippstatus" });
+      var statusLayer = new GraphicsLayer({ title:"GPS-position" });
       var trackLayer = new GraphicsLayer({ title:"GPS-spår" });
+      var pinsLayer = new GraphicsLayer({ title:"Egna nålar" });
 
       var webmap = new WebMap({
         portalItem: {
@@ -354,7 +355,7 @@
         }
       });
 
-      webmap.layers.addMany([skotselLayer, statusLayer, trackLayer]);
+      webmap.layers.addMany([skotselLayer, trackLayer, pinsLayer, statusLayer]);
 
       var view = new MapView({
         container:"viewDiv",
@@ -638,16 +639,12 @@
 
       function redrawPins() {
         try {
-          var toRemove = [];
-          view.graphics.forEach(function(g) {
-            if (g.attributes && g.attributes.__type === "pin") toRemove.push(g);
-          });
-          for (var i = 0; i < toRemove.length; i++) view.graphics.remove(toRemove[i]);
+          pinsLayer.removeAll();
 
           for (var j = 0; j < pins.length; j++) {
             var p = pins[j];
             if (!p.geometry) continue;
-            view.graphics.add(new Graphic({
+            pinsLayer.add(new Graphic({
               geometry:p.geometry,
               attributes:{ id:p.id, type:p.type, status:p.status, createdAt:p.createdAt, __type:"pin" },
               symbol:{
@@ -684,11 +681,29 @@
         document.getElementById("mainBtnLabel").textContent = "Stoppa";
         setStatus("searching", "Söker GPS…", "Väntar på position");
 
+        // Snabb första fix: fråga direkt efter en position med låg
+        // noggrannhetskrav och tillåt en gammal cachead position (upp till
+        // 1 minut). Detta ger oftast ett svar på under en sekund från
+        // nätverk/senast kända GPS-läge, så användaren ser sin position
+        // direkt i stället för att vid varje start vänta på en kall,
+        // högnoggrann GPS-fix som kan ta flera minuter.
+        try {
+          navigator.geolocation.getCurrentPosition(function(pos) {
+            if (!lastGpsPoint) {
+              var c = pos.coords;
+              var quick = { lat:c.latitude, lon:c.longitude, accuracy:Math.round(c.accuracy || 999) };
+              drawGps(quick);
+              lastGpsPoint = quick;
+              goToSafe(c.longitude, c.latitude);
+            }
+          }, function() {}, { enableHighAccuracy:false, maximumAge:60000, timeout:5000 });
+        } catch(e) {}
+
         try {
           watchId = navigator.geolocation.watchPosition(onPos, function(err) {
             showToastSafe("GPS-fel: " + (err && err.message ? err.message : "okänt"));
             stopTrack();
-          }, { enableHighAccuracy:true, maximumAge:1000, timeout:10000 });
+          }, { enableHighAccuracy:true, maximumAge:2000, timeout:30000 });
         } catch(e) {
           showToastSafe("Kunde inte starta GPS");
           tracking = false;
@@ -738,11 +753,12 @@
           setStatus("live", "Spårar", "Noggrannhet ±" + p.accuracy + " m");
 
           if (p.accuracy <= BAD_ACCURACY) {
+            var isFirstRealFix = !lastGpsPoint || !lastGpsPoint.__real;
+            p.__real = true;
             drawGps(p);
             lastGpsPoint = p;
-            if (!lastGpsPoint || !lastGpsPoint.__centered) {
+            if (isFirstRealFix) {
               goToSafe(p.lon, p.lat);
-              lastGpsPoint.__centered = true;
             }
           }
 
@@ -780,7 +796,7 @@
                 outline:{ color:[255,255,255,1], width:4 }
               }
             });
-            view.graphics.add(gpsGraphic);
+            statusLayer.add(gpsGraphic);
           }
         } catch(e) {}
       }

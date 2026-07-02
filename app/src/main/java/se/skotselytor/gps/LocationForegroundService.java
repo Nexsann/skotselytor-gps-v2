@@ -71,7 +71,20 @@ public class LocationForegroundService extends Service {
             };
 
             if (locationManager != null) {
-                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000, 3, locationListener);
+                // Be om uppdateringar från BÅDE GPS och nätverk. Nätverks-
+                // positionen kommer oftast nästan direkt (sekunder) medan en
+                // kall GPS-fix kan ta flera minuter utomhus och ännu längre
+                // om enheten nyss startats om. Detta gör att appen visar en
+                // ungefärlig position snabbt, och sedan skärper till exakt
+                // GPS-position när den blir tillgänglig.
+                try {
+                    locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1500, 2, locationListener);
+                } catch (Exception ignored) {
+                }
+                try {
+                    locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1500, 2, locationListener);
+                } catch (Exception ignored) {
+                }
             }
         } catch (Exception ignored) {
         }

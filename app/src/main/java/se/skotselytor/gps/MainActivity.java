@@ -54,6 +54,13 @@ public class MainActivity extends Activity {
         webView = new WebView(this);
         setContentView(webView);
 
+        // Tvinga GPU-rendering och högsta möjliga uppdateringsfrekvens för
+        // WebView, annars kan kartan kännas trög/hackig även på skärmar
+        // med 90/120Hz eftersom Android annars kan falla tillbaka på
+        // mjukvaru-rendering i vissa WebView-lägen.
+        webView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+        requestHighRefreshRate();
+
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -63,6 +70,8 @@ public class MainActivity extends Activity {
         s.setAllowContentAccess(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(false);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        s.setOffscreenPreRaster(true);
 
         webView.addJavascriptInterface(new WebAppInterface(this), "Android");
         webView.setWebViewClient(new WebViewClient());
@@ -94,6 +103,21 @@ public class MainActivity extends Activity {
         // är fastmonterad och spårning ska kunna fortsätta även om skärmen
         // släcks eller telefonen låses medan klipparen körs.
         startBackgroundTracking();
+    }
+
+    private void requestHighRefreshRate() {
+        // Enkel, säker variant: sätt bara den attribut-baserade hint:en på
+        // fönstret. Ingen manipulation av Display.Mode (det orsakade
+        // krascher tidigare) - det här är bara en "önskan" till systemet
+        // och kan aldrig ge en SecurityException eller krasch.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.preferredRefreshRate = 120f;
+                getWindow().setAttributes(lp);
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private void requestIgnoreBatteryOptimizations() {
