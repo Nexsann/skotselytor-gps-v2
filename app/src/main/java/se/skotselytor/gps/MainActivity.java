@@ -54,11 +54,12 @@ public class MainActivity extends Activity {
         webView = new WebView(this);
         setContentView(webView);
 
-        // Tvinga GPU-rendering och högsta möjliga uppdateringsfrekvens för
-        // WebView, annars kan kartan kännas trög/hackig även på skärmar
-        // med 90/120Hz eftersom Android annars kan falla tillbaka på
-        // mjukvaru-rendering i vissa WebView-lägen.
-        webView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+        // OBS: sätt INTE LAYER_TYPE_HARDWARE här. WebView hanterar sin
+        // egen GPU-rendering internt (den är redan hArdwareaccelererad via
+        // manifestet), och att tvinga ett extra hardware-lager ovanpå hela
+        // WebView-vyn skapar en extra bitmap-komposition som i praktiken
+        // gjorde kartan trögare, inte snabbare. Standardläget (LAYER_TYPE_
+        // NONE) låter Chromium sköta compositing själv, vilket är snabbast.
         requestHighRefreshRate();
 
         WebSettings s = webView.getSettings();
