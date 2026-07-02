@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"/>
+  <title>Skötselytor GPS</title>
+  <link rel="stylesheet" href="https://js.arcgis.com/4.31/esri/themes/light/main.css">
+  <script src="https://js.arcgis.com/4.31/"></script>
+  <style>
+    html, body, #viewDiv {
+      margin:0; padding:0; height:100%; width:100%; overflow:hidden;
+      font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background:#0a0f1a;
+      -webkit-user-select:none; user-select:none;
+    }
+
+    /* ---------- Statusrad högst upp: stor, tydlig, läsbar i solljus ---------- */
+    .topBar {
+      position:fixed; top:0; left:0; right:0; z-index:20;
+      padding:calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
+      background:linear-gradient(180deg, rgba(5,8,15,.85) 0%, rgba(5,8,15,0) 100%);
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      pointer-events:none;
+    }
+    .statusChip {
+      pointer-events:auto;
+      display:flex; align-items:center; gap:9px;
+      background:rgba(10,15,25,.85);
+      -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:16px; padding:10px 16px;
+      color:white;
+    }
+    .dot { width:12px; height:12px; border-radius:50%; background:#64748b; flex:none; }
+    .dot.live { background:#22c55e; box-shadow:0 0 0 5px rgba(34,197,94,.25); }
+    .dot.searching { background:#f59e0b; box-shadow:0 0 0 5px rgba(245,158,11,.25); animation:pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .statusText { font-size:15px; font-weight:800; letter-spacing:-.01em; }
+    .statusSub { font-size:11px; color:rgba(255,255,255,.55); font-weight:600; margin-top:1px; }
+
+    .battChip {
+      pointer-events:auto;
+      background:rgba(10,15,25,.85);
+      -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:16px; padding:10px 14px; color:white;
+      font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px;
+    }
+
+    /* ---------- Stor knapp: Kom till mig / Spåra ---------- */
+    .mainBtn {
+      position:fixed; z-index:20;
+      right:16px; bottom:calc(env(safe-area-inset-bottom, 0px) + 22px);
+      width:76px; height:76px; border-radius:50%; border:0;
+      background:#22c55e; color:#052e16;
+      box-shadow:0 10px 26px rgba(0,0,0,.4), 0 0 0 4px rgba(34,197,94,.18);
+      display:flex; align-items:center; justify-content:center;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .mainBtn.active { background:#f59e0b; color:#1c1300; box-shadow:0 10px 26px rgba(0,0,0,.4), 0 0 0 4px rgba(245,158,11,.22); }
+    .mainBtn svg { width:34px; height:34px; }
+    .mainBtnLabel {
+      position:fixed; z-index:20; right:14px;
+      bottom:calc(env(safe-area-inset-bottom, 0px) + 100px);
+      background:rgba(10,15,25,.85); color:white; font-size:11.5px; font-weight:800;
+      padding:5px 10px; border-radius:10px; text-align:center; width:80px;
+    }
+
+    /* ---------- Zoom-knappar, stora, till vänster ---------- */
+    .zoomGroup {
+      position:fixed; z-index:20; left:16px;
+      bottom:calc(env(safe-area-inset-bottom, 0px) + 22px);
+      display:flex; flex-direction:column; gap:10px;
+    }
+    .zoomBtn {
+      width:52px; height:52px; border-radius:16px; border:0;
+      background:rgba(10,15,25,.85); color:white;
+      -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+      border:1px solid rgba(255,255,255,.12);
+      display:flex; align-items:center; justify-content:center;
+      font-size:26px; font-weight:700;
+    }
+
+    /* ---------- Paneler ---------- */
+    .panel {
+      position:fixed; left:0; right:0; bottom:0; z-index:30;
+      background:#111826; color:white;
+      border-radius:22px 22px 0 0;
+      box-shadow:0 -10px 34px rgba(0,0,0,.45);
+      display:none; overflow:hidden; max-height:64vh;
+      padding-bottom:env(safe-area-inset-bottom, 0px);
+    }
+    .panel.open { display:block; }
+    .panelHandle { width:40px; height:5px; border-radius:99px; background:rgba(255,255,255,.22); margin:10px auto 0; }
+    .panelHead {
+      padding:12px 18px 12px; border-bottom:1px solid rgba(255,255,255,.08);
+      display:flex; justify-content:space-between; gap:10px; align-items:flex-start;
+    }
+    .panelHead h2 { margin:0; font-size:19px; font-weight:800; }
+    .panelHead small { display:block; color:rgba(255,255,255,.5); margin-top:3px; font-size:12.5px; }
+    .panelHead button.close {
+      border:0; background:rgba(255,255,255,.1); color:white;
+      width:34px; height:34px; border-radius:50%; font-size:18px; flex:none;
+    }
+    .panelBody { padding:16px 18px; overflow:auto; max-height:calc(64vh - 74px); }
+    .meta { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-bottom:12px; }
+    .meta div { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); border-radius:13px; padding:10px 12px; min-width:0; }
+    .meta b { display:block; font-size:10px; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.04em; }
+    .meta span { display:block; font-size:14.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+    input, textarea, select {
+      width:100%; box-sizing:border-box; border:1px solid rgba(255,255,255,.14);
+      border-radius:14px; padding:14px; margin-top:9px; font:inherit; font-size:15px;
+      background:rgba(255,255,255,.06); color:white;
+    }
+    .statuses { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:10px; }
+    .statuses button {
+      border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.06); color:white;
+      border-radius:14px; padding:14px; font-weight:800; font-size:14px;
+    }
+    .statuses button.active { outline:2.5px solid #38bdf8; background:rgba(56,189,248,.18); }
+    .save { width:100%; margin-top:14px; background:#2563eb; color:white; border-radius:14px; padding:16px; font-weight:800; font-size:16px; border:0; }
+    .delete { width:100%; margin-top:9px; background:rgba(239,68,68,.16); color:#fca5a5; border-radius:14px; padding:13px; font-weight:700; border:0; }
+    .hidden { display:none !important; }
+
+    .toast {
+      position:fixed; left:50%; bottom:120px; transform:translateX(-50%) translateY(6px);
+      z-index:80; background:rgba(2,6,23,.94); color:white; border-radius:999px;
+      padding:12px 20px; font-weight:800; font-size:14px; opacity:0;
+      transition:opacity .18s ease, transform .18s ease; white-space:nowrap;
+      max-width:82vw; text-overflow:ellipsis; overflow:hidden;
+      border:1px solid rgba(255,255,255,.1);
+    }
+    .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+    /* Startskärm: syns tills GPS/karta är redo, ger tydlig återkoppling
+       i stället för en tom svart skärm om något laddar långsamt. */
+    .splash {
+      position:fixed; inset:0; z-index:100; background:#0a0f1a; color:white;
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+    }
+    .splash.hide { display:none; }
+    .splash b { font-size:20px; font-weight:800; }
+    .splash span { font-size:13px; color:rgba(255,255,255,.55); }
+    .spinner {
+      width:38px; height:38px; border-radius:50%;
+      border:4px solid rgba(255,255,255,.15); border-top-color:#22c55e;
+      animation:spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="viewDiv"></div>
+
+  <div class="splash" id="splash">
+    <div class="spinner"></div>
+    <b>Skötselytor GPS</b>
+    <span id="splashText">Laddar karta…</span>
+  </div>
+
+  <div class="topBar">
+    <div class="statusChip">
+      <div class="dot" id="statusDot"></div>
+      <div>
+        <div class="statusText" id="statusText">Ej startad</div>
+        <div class="statusSub" id="statusSub">Tryck på knappen för att starta</div>
+      </div>
+    </div>
+    <div class="battChip" id="battChip">🔋 --%</div>
+  </div>
+
+  <div class="zoomGroup">
+    <button class="zoomBtn" id="zoomInBtn">+</button>
+    <button class="zoomBtn" id="zoomOutBtn">−</button>
+  </div>
+
+  <div class="mainBtnLabel" id="mainBtnLabel">Kom till mig</div>
+  <button class="mainBtn" id="mainBtn" aria-label="Starta spårning och centrera">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22"/></svg>
+  </button>
+
+  <div class="panel" id="areaPanel">
+    <div class="panelHandle"></div>
+    <div class="panelHead">
+      <div>
+        <h2 id="areaTitle">Vald yta</h2>
+        <small>Klippstatus för vald skötselyta</small>
+      </div>
+      <button class="close" id="closeArea">×</button>
+    </div>
+    <div class="panelBody">
+      <div class="meta">
+        <div><b>ID</b><span id="mId">-</span></div>
+        <div><b>Typ</b><span id="mType">-</span></div>
+        <div><b>Team</b><span id="mTeam">-</span></div>
+        <div><b>Distrikt</b><span id="mDistrict">-</span></div>
+      </div>
+      <input id="worker" placeholder="Ditt namn">
+      <div class="statuses">
+        <button data-status="Ej klippt">Ej klippt</button>
+        <button data-status="Pågår">Pågår</button>
+        <button data-status="Klippt">Klippt</button>
+        <button data-status="Problem">Problem</button>
+      </div>
+      <textarea id="comment" rows="3" placeholder="Kommentar"></textarea>
+      <button class="save" id="saveAreaBtn">Spara status</button>
+    </div>
+  </div>
+
+  <div class="panel" id="pinPanel">
+    <div class="panelHandle"></div>
+    <div class="panelHead">
+      <div>
+        <h2 id="pinTitle">Egen nål</h2>
+        <small id="pinSub">Kommentar/avvikelse på kartan</small>
+      </div>
+      <button class="close" id="closePin">×</button>
+    </div>
+    <div class="panelBody">
+      <select id="pinType">
+        <option value="Handjagare krävs">Handjagare krävs</option>
+        <option value="Hinder">Hinder</option>
+        <option value="Går ej klippa">Går ej klippa</option>
+        <option value="Behöver kollas">Behöver kollas</option>
+        <option value="Annat">Annat</option>
+      </select>
+      <textarea id="pinComment" rows="4" placeholder="Kommentar"></textarea>
+      <select id="pinStatus">
+        <option value="Öppen">Öppen</option>
+        <option value="Fixad">Fixad</option>
+      </select>
+      <button class="save" id="savePinBtn">Spara nål</button>
+      <button class="delete hidden" id="deletePinBtn">Ta bort nål</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">Sparat</div>
+
+  <script>
+    // ---------- Global felfångst: appen ska ALDRIG krascha/frysa ----------
+    window.addEventListener("error", function(e) {
+      try { showToastSafe("Fel: " + (e && e.message ? e.message : "okänt")); } catch(_) {}
+    });
+    window.addEventListener("unhandledrejection", function(e) {
+      try { showToastSafe("Fel: " + (e && e.reason ? e.reason : "okänt")); } catch(_) {}
+    });
+
+    function showToastSafe(t) {
+      var el = document.getElementById("toast");
+      if (!el) return;
+      el.textContent = t;
+      el.classList.add("show");
+      setTimeout(function(){ el.classList.remove("show"); }, 2500);
+    }
+
+    function hideSplash() {
+      var el = document.getElementById("splash");
+      if (el) el.classList.add("hide");
+    }
+
+    function setSplashText(t) {
+      var el = document.getElementById("splashText");
+      if (el) el.textContent = t;
+    }
+
+    // Batterinivå, om enheten stödjer Battery Status API.
+    if (navigator.getBattery) {
+      navigator.getBattery().then(function(battery) {
+        function updateBatt() {
+          var pct = Math.round(battery.level * 100);
+          var el = document.getElementById("battChip");
+          if (el) el.textContent = (battery.charging ? "⚡ " : "🔋 ") + pct + "%";
+        }
+        updateBatt();
+        battery.addEventListener("levelchange", updateBatt);
+        battery.addEventListener("chargingchange", updateBatt);
+      }).catch(function(){});
+    }
+
+    require([
+      "esri/config",
+      "esri/WebMap",
+      "esri/views/MapView",
+      "esri/layers/FeatureLayer",
+      "esri/layers/GraphicsLayer",
+      "esri/Graphic",
+      "esri/geometry/Polyline"
+    ], function(esriConfig, WebMap, MapView, FeatureLayer, GraphicsLayer, Graphic, Polyline) {
+
+      esriConfig.portalUrl = "https://kartor.linkoping.se/portal";
+
+      var WEBMAP_ID = "4811ba982b9e4a97b01cf4353224374b";
+      var LAYER_URL = "https://kartor.linkoping.se/arcgis/rest/services/sts_omradeskarta/sts_skotselkartan_l/MapServer/32";
+
+      var STORE_KEY = "skotselytor_status_v1";
+      var TRACK_KEY = "skotselytor_track_v2";
+      var PINS_KEY = "skotselytor_pins_v2";
+
+      var GOOD_ACCURACY = 30;
+      var BAD_ACCURACY = 80;
+      var IMPOSSIBLE_JUMP_METERS = 70;
+      var MIN_TRACK_DISTANCE_METERS = 2.5;
+      var LONG_PRESS_MS = 550;
+
+      var selectedArea = null;
+      var selectedPinId = null;
+      var pendingPinGeometry = null;
+      var areaStatus = "Ej klippt";
+      var watchId = null;
+      var tracking = false;
+      var gpsGraphic = null;
+      var lineGraphic = null;
+      var lastGpsPoint = null;
+      var mapReady = false;
+
+      var longPressTimer = null;
+      var longPressFired = false;
+      var pressStartXY = null;
+
+      var statuses = safeParse(localStorage.getItem(STORE_KEY), {});
+      var track = safeParse(localStorage.getItem(TRACK_KEY), []);
+      var pins = safeParse(localStorage.getItem(PINS_KEY), []);
+
+      function safeParse(raw, fallback) {
+        try { return raw ? JSON.parse(raw) : fallback; } catch(e) { return fallback; }
+      }
+      function safeSave(key, value) {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+      }
+
+      var statusLayer = new GraphicsLayer({ title:"Klippstatus" });
+      var trackLayer = new GraphicsLayer({ title:"GPS-spår" });
+
+      var webmap = new WebMap({
+        portalItem: {
+          id: WEBMAP_ID,
+          portal: { url: "https://kartor.linkoping.se/portal" }
+        }
+      });
+
+      var skotselLayer = new FeatureLayer({
+        url: LAYER_URL,
+        outFields:["*"],
+        opacity:0.22,
+        popupEnabled:false,
+        popupTemplate:null,
+        renderer:{
+          type:"simple",
+          symbol:{
+            type:"simple-fill",
+            color:[0,0,0,0],
+            outline:{ color:[8,46,92,.75], width:.8 }
+          }
+        }
+      });
+
+      webmap.layers.addMany([skotselLayer, statusLayer, trackLayer]);
+
+      var view = new MapView({
+        container:"viewDiv",
+        map:webmap,
+        padding:{ top:16 },
+        constraints:{ snapToZoom:false },
+        popupEnabled:false,
+        ui:{ components:[] } // Tar bort ArcGIS standard-UI (zoom, attribution-knapp etc), vi har egna kontroller.
+      });
+
+      view.popupEnabled = false;
+      try { view.popup.autoOpenEnabled = false; } catch(e) {}
+
+      setSplashText("Laddar karta…");
+      var splashTimeout = setTimeout(function() {
+        // Om kartan tar väldigt lång tid (svag uppkoppling), släpp splashen
+        // ändå efter 12s så appen inte känns fastlåst.
+        hideSplash();
+      }, 12000);
+
+      view.when(function() {
+        mapReady = true;
+        clearTimeout(splashTimeout);
+        try {
+          webmap.allLayers.forEach(function(layer) {
+            try { layer.popupEnabled = false; layer.popupTemplate = null; } catch(e) {}
+          });
+        } catch(e) {}
+        redrawTrack();
+        redrawPins();
+        hideSplash();
+        // Starta spårning automatiskt när kartan är redo, eftersom
+        // telefonen sitter fastmonterad och ska börja spåra direkt.
+        startTrack();
+      }, function(err) {
+        clearTimeout(splashTimeout);
+        setSplashText("Kartan kunde inte laddas. Kontrollera internetanslutning.");
+      });
+
+      // ---------- Stor knapp: starta/stoppa spårning + centrera ----------
+      var mainBtn = document.getElementById("mainBtn");
+      mainBtn.addEventListener("click", function() {
+        if (tracking) {
+          stopTrack();
+        } else {
+          startTrack();
+        }
+        if (lastGpsPoint) {
+          goToSafe(lastGpsPoint.lon, lastGpsPoint.lat);
+        }
+      });
+
+      document.getElementById("zoomInBtn").addEventListener("click", function() {
+        try { view.goTo({ zoom: view.zoom + 1 }, { animate:true, duration:200 }).catch(function(){}); } catch(e) {}
+      });
+      document.getElementById("zoomOutBtn").addEventListener("click", function() {
+        try { view.goTo({ zoom: view.zoom - 1 }, { animate:true, duration:200 }).catch(function(){}); } catch(e) {}
+      });
+
+      document.getElementById("closeArea").addEventListener("click", closeAreaPanel);
+      document.getElementById("closePin").addEventListener("click", closePinPanel);
+
+      var statusButtons = document.querySelectorAll("[data-status]");
+      for (var i = 0; i < statusButtons.length; i++) {
+        statusButtons[i].addEventListener("click", function(ev) {
+          areaStatus = ev.currentTarget.getAttribute("data-status");
+          markAreaStatus();
+        });
+      }
+
+      document.getElementById("saveAreaBtn").addEventListener("click", function() {
+        if (!selectedArea) return;
+        var a = selectedArea.attributes || {};
+        var id = a.OBJECTID;
+        statuses[id] = {
+          id:id,
+          status:areaStatus,
+          worker:document.getElementById("worker").value,
+          comment:document.getElementById("comment").value,
+          savedAt:new Date().toISOString(),
+          subtyp:a.SUBTYP || "",
+          team:a.TEAM || a.Team || "",
+          distrikt:a.DISTRIKT || ""
+        };
+        safeSave(STORE_KEY, statuses);
+        showToastSafe("Status sparad");
+      });
+
+      document.getElementById("savePinBtn").addEventListener("click", savePin);
+      document.getElementById("deletePinBtn").addEventListener("click", deletePin);
+
+      // ---------- Kartinteraktion: kort tryck = välj, långtryck = ny nål ----------
+      view.on("pointer-down", function(e) {
+        longPressFired = false;
+        pressStartXY = { x:e.x, y:e.y };
+        clearTimeout(longPressTimer);
+        longPressTimer = setTimeout(function() {
+          longPressFired = true;
+          try {
+            var mapPoint = view.toMap({ x:pressStartXY.x, y:pressStartXY.y });
+            if (mapPoint) {
+              pendingPinGeometry = mapPoint.clone().toJSON();
+              selectedPinId = null;
+              openPinPanelForNew();
+              if (navigator.vibrate) { try { navigator.vibrate(30); } catch(e2) {} }
+            }
+          } catch(err) {
+            showToastSafe("Kunde inte placera nål");
+          }
+        }, LONG_PRESS_MS);
+      });
+
+      view.on("pointer-move", function(e) {
+        if (!pressStartXY) return;
+        var dx = e.x - pressStartXY.x;
+        var dy = e.y - pressStartXY.y;
+        if ((dx*dx + dy*dy) > 400) {
+          clearTimeout(longPressTimer);
+        }
+      });
+
+      view.on("pointer-up", function() {
+        clearTimeout(longPressTimer);
+        pressStartXY = null;
+      });
+
+      view.on("click", function(e) {
+        if (longPressFired) {
+          longPressFired = false;
+          return;
+        }
+
+        try { view.popup.close(); } catch(err) {}
+
+        view.hitTest(e).then(function(hit) {
+          var results = hit && hit.results ? hit.results : [];
+          var pinHit = null;
+          var areaHit = null;
+
+          for (var i = 0; i < results.length; i++) {
+            var g = results[i].graphic;
+            if (!g || !g.attributes) continue;
+            if (g.attributes.__type === "pin" && !pinHit) pinHit = g;
+            if (g.layer === skotselLayer && !areaHit) areaHit = g;
+          }
+
+          if (pinHit) {
+            openPinPanelForExisting(pinHit.attributes.id);
+            return;
+          }
+          if (areaHit) {
+            selectedArea = areaHit;
+            openAreaPanel(areaHit);
+          }
+        }).catch(function() {});
+      });
+
+      function goToSafe(lon, lat) {
+        try {
+          view.goTo({ center:[lon, lat], scale:Math.min(view.scale || 900, 900) }, { animate:true, duration:400 }).catch(function(){});
+        } catch(e) {}
+      }
+
+      function openAreaPanel(g) {
+        closePinPanel();
+        var a = g.attributes || {};
+        var id = a.OBJECTID;
+        var saved = statuses[id];
+        areaStatus = saved ? saved.status : "Ej klippt";
+
+        document.getElementById("areaTitle").textContent = label(a.SUBTYP);
+        document.getElementById("mId").textContent = id || "-";
+        document.getElementById("mType").textContent = a.SUBTYP || "-";
+        document.getElementById("mTeam").textContent = a.TEAM || a.Team || "-";
+        document.getElementById("mDistrict").textContent = a.DISTRIKT || "-";
+        document.getElementById("comment").value = saved ? saved.comment : "";
+        document.getElementById("worker").value = saved ? (saved.worker || "") : "";
+        markAreaStatus();
+        document.getElementById("areaPanel").classList.add("open");
+      }
+
+      function closeAreaPanel() {
+        document.getElementById("areaPanel").classList.remove("open");
+        selectedArea = null;
+      }
+
+      function markAreaStatus() {
+        var buttons = document.querySelectorAll("[data-status]");
+        for (var i = 0; i < buttons.length; i++) {
+          var b = buttons[i];
+          if (b.getAttribute("data-status") === areaStatus) b.classList.add("active");
+          else b.classList.remove("active");
+        }
+      }
+
+      function openPinPanelForNew() {
+        closeAreaPanel();
+        selectedPinId = null;
+        document.getElementById("pinTitle").textContent = "Ny nål";
+        document.getElementById("pinSub").textContent = "Spara kommentar på vald plats";
+        document.getElementById("pinType").value = "Handjagare krävs";
+        document.getElementById("pinComment").value = "";
+        document.getElementById("pinStatus").value = "Öppen";
+        document.getElementById("deletePinBtn").classList.add("hidden");
+        document.getElementById("pinPanel").classList.add("open");
+      }
+
+      function openPinPanelForExisting(id) {
+        var p = null;
+        for (var i = 0; i < pins.length; i++) { if (pins[i].id === id) { p = pins[i]; break; } }
+        if (!p) return;
+        selectedPinId = id;
+        pendingPinGeometry = p.geometry;
+
+        closeAreaPanel();
+        document.getElementById("pinTitle").textContent = p.type || "Egen nål";
+        document.getElementById("pinSub").textContent = p.createdAt ? ("Skapad: " + new Date(p.createdAt).toLocaleString("sv-SE")) : "Sparad nål";
+        document.getElementById("pinType").value = p.type || "Annat";
+        document.getElementById("pinComment").value = p.comment || "";
+        document.getElementById("pinStatus").value = p.status || "Öppen";
+        document.getElementById("deletePinBtn").classList.remove("hidden");
+        document.getElementById("pinPanel").classList.add("open");
+      }
+
+      function savePin() {
+        if (!pendingPinGeometry) {
+          showToastSafe("Ingen plats vald");
+          return;
+        }
+
+        var existing = null;
+        if (selectedPinId) {
+          for (var i = 0; i < pins.length; i++) { if (pins[i].id === selectedPinId) { existing = pins[i]; break; } }
+        }
+
+        var data = {
+          id: selectedPinId || ("pin_" + Date.now()),
+          geometry: pendingPinGeometry,
+          type: document.getElementById("pinType").value,
+          comment: document.getElementById("pinComment").value,
+          status: document.getElementById("pinStatus").value,
+          createdAt: existing ? existing.createdAt : new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        var found = false;
+        for (var j = 0; j < pins.length; j++) {
+          if (pins[j].id === data.id) { pins[j] = data; found = true; break; }
+        }
+        if (!found) pins.push(data);
+
+        safeSave(PINS_KEY, pins);
+        selectedPinId = data.id;
+        redrawPins();
+        showToastSafe("Nål sparad");
+        closePinPanel();
+      }
+
+      function deletePin() {
+        if (!selectedPinId) return;
+        var ok = true;
+        try { ok = confirm("Ta bort denna nål?"); } catch(e) {}
+        if (!ok) return;
+
+        var next = [];
+        for (var i = 0; i < pins.length; i++) {
+          if (pins[i].id !== selectedPinId) next.push(pins[i]);
+        }
+        pins = next;
+        safeSave(PINS_KEY, pins);
+        redrawPins();
+        showToastSafe("Nål borttagen");
+        closePinPanel();
+      }
+
+      function closePinPanel() {
+        document.getElementById("pinPanel").classList.remove("open");
+        selectedPinId = null;
+        pendingPinGeometry = null;
+      }
+
+      function redrawPins() {
+        try {
+          var toRemove = [];
+          view.graphics.forEach(function(g) {
+            if (g.attributes && g.attributes.__type === "pin") toRemove.push(g);
+          });
+          for (var i = 0; i < toRemove.length; i++) view.graphics.remove(toRemove[i]);
+
+          for (var j = 0; j < pins.length; j++) {
+            var p = pins[j];
+            if (!p.geometry) continue;
+            view.graphics.add(new Graphic({
+              geometry:p.geometry,
+              attributes:{ id:p.id, type:p.type, status:p.status, createdAt:p.createdAt, __type:"pin" },
+              symbol:{
+                type:"simple-marker",
+                style:p.status === "Fixad" ? "diamond" : "circle",
+                color: pinColor(p.type, p.status),
+                size:26,
+                outline:{ color:[255,255,255,1], width:3 }
+              }
+            }));
+          }
+        } catch(e) {
+          showToastSafe("Kunde inte rita nålar");
+        }
+      }
+
+      function pinColor(type, status) {
+        if (status === "Fixad") return [34,197,94,0.95];
+        if (type === "Handjagare krävs") return [245,158,11,0.95];
+        if (type === "Går ej klippa") return [239,68,68,0.95];
+        if (type === "Hinder") return [168,85,247,0.95];
+        return [56,189,248,0.95];
+      }
+
+      // ---------- GPS-spårning ----------
+      function startTrack() {
+        if (tracking) return;
+        if (!navigator.geolocation) {
+          showToastSafe("GPS stöds inte");
+          return;
+        }
+        tracking = true;
+        mainBtn.classList.add("active");
+        document.getElementById("mainBtnLabel").textContent = "Stoppa";
+        setStatus("searching", "Söker GPS…", "Väntar på position");
+
+        try {
+          watchId = navigator.geolocation.watchPosition(onPos, function(err) {
+            showToastSafe("GPS-fel: " + (err && err.message ? err.message : "okänt"));
+            stopTrack();
+          }, { enableHighAccuracy:true, maximumAge:1000, timeout:10000 });
+        } catch(e) {
+          showToastSafe("Kunde inte starta GPS");
+          tracking = false;
+          mainBtn.classList.remove("active");
+          return;
+        }
+
+        if (typeof Android !== "undefined" && Android.startBackgroundTracking) {
+          try { Android.startBackgroundTracking(); } catch(e) {}
+        }
+      }
+
+      function stopTrack() {
+        tracking = false;
+        if (watchId !== null) {
+          try { navigator.geolocation.clearWatch(watchId); } catch(e) {}
+        }
+        watchId = null;
+        mainBtn.classList.remove("active");
+        document.getElementById("mainBtnLabel").textContent = "Kom till mig";
+        setStatus("off", "Ej startad", "Tryck på knappen för att starta");
+
+        if (typeof Android !== "undefined" && Android.stopBackgroundTracking) {
+          try { Android.stopBackgroundTracking(); } catch(e) {}
+        }
+      }
+
+      function setStatus(state, text, sub) {
+        var dot = document.getElementById("statusDot");
+        var t = document.getElementById("statusText");
+        var s = document.getElementById("statusSub");
+        if (dot) dot.className = "dot" + (state === "live" ? " live" : state === "searching" ? " searching" : "");
+        if (t) t.textContent = text;
+        if (s) s.textContent = sub;
+      }
+
+      function onPos(pos) {
+        try {
+          var c = pos.coords;
+          var p = {
+            lat:c.latitude,
+            lon:c.longitude,
+            accuracy:Math.round(c.accuracy || 0),
+            time:new Date(pos.timestamp || Date.now()).toISOString()
+          };
+
+          setStatus("live", "Spårar", "Noggrannhet ±" + p.accuracy + " m");
+
+          if (p.accuracy <= BAD_ACCURACY) {
+            drawGps(p);
+            lastGpsPoint = p;
+            if (!lastGpsPoint || !lastGpsPoint.__centered) {
+              goToSafe(p.lon, p.lat);
+              lastGpsPoint.__centered = true;
+            }
+          }
+
+          if (p.accuracy > GOOD_ACCURACY) return;
+
+          var last = track.length ? track[track.length - 1] : null;
+          if (last) {
+            var d = distance(last.lat, last.lon, p.lat, p.lon);
+            if (d > IMPOSSIBLE_JUMP_METERS && p.accuracy > 15) return;
+            if (d < MIN_TRACK_DISTANCE_METERS) return;
+          }
+
+          track.push(p);
+          safeSave(TRACK_KEY, track);
+          redrawTrack();
+        } catch(e) {
+          showToastSafe("GPS-uppdatering misslyckades");
+        }
+      }
+
+      function drawGps(p) {
+        try {
+          var point = { type:"point", longitude:p.lon, latitude:p.lat, spatialReference:{ wkid:4326 } };
+          if (gpsGraphic) {
+            gpsGraphic.geometry = point;
+          } else {
+            gpsGraphic = new Graphic({
+              geometry:point,
+              attributes:{ __type:"gps" },
+              symbol:{
+                type:"simple-marker",
+                style:"circle",
+                color:[56,189,248,1],
+                size:22,
+                outline:{ color:[255,255,255,1], width:4 }
+              }
+            });
+            view.graphics.add(gpsGraphic);
+          }
+        } catch(e) {}
+      }
+
+      function redrawTrack() {
+        try {
+          if (lineGraphic) trackLayer.remove(lineGraphic);
+          if (track.length < 2) return;
+
+          var paths = [];
+          for (var i = 0; i < track.length; i++) paths.push([track[i].lon, track[i].lat]);
+
+          lineGraphic = new Graphic({
+            geometry:new Polyline({ paths:[paths], spatialReference:{ wkid:4326 } }),
+            symbol:{ type:"simple-line", color:[34,197,94,.9], width:5 }
+          });
+          trackLayer.add(lineGraphic);
+        } catch(e) {}
+      }
+
+      function distance(lat1,lon1,lat2,lon2) {
+        var R = 6371000;
+        function r(d) { return d * Math.PI / 180; }
+        var dLat = r(lat2-lat1);
+        var dLon = r(lon2-lon1);
+        var a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(r(lat1))*Math.cos(r(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      }
+
+      function label(v) {
+        var m = {
+          bruksgrasmatta:"Bruksgräsmatta",
+          hogvuxen_grasyta_ang:"Högvuxen gräsyta/Äng",
+          bruksgrasmatta_robot:"Bruksgräsmatta med robot",
+          plantering:"Plantering",
+          naturmark:"Naturmark",
+          grasarmering:"Gräsarmering"
+        };
+        return m[v] || v || "Skötselyta";
+      }
+    });
+  </script>
+</body>
+</html>
