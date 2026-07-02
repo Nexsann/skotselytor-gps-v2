@@ -355,7 +355,15 @@
         }
       });
 
-      webmap.layers.addMany([skotselLayer, trackLayer, pinsLayer, statusLayer]);
+      // OBS: Lägg INTE till våra egna lager här direkt. WebMap laddar sina
+      // egna lager från portalen asynkront, och de läggs till i
+      // webmap.layers NÄR DE BLIR KLARA - alltså kan de hamna EFTER
+      // (alltså över, ovanpå) våra lager om vi lägger till dem innan
+      // kartan är klarladdad. Det var därför nålarna aldrig syntes -
+      // portalens egna lager målade över dem. Vi lägger därför till våra
+      // lager EFTER att webmap.load() är klar, så de garanterat hamnar
+      // överst i ritordningen.
+      skotselLayer.opacity = 0.22;
 
       var view = new MapView({
         container:"viewDiv",
@@ -384,6 +392,16 @@
             try { layer.popupEnabled = false; layer.popupTemplate = null; } catch(e) {}
           });
         } catch(e) {}
+
+        // Kartan (inklusive alla portalens egna lager) är nu helt laddad.
+        // Lägg till våra egna lager HÄR, sist, så de garanterat hamnar
+        // överst i ritordningen och aldrig hamnar dolda bakom något från
+        // portalen. skotselLayer läggs också till här istället för direkt
+        // vid start, av samma anledning.
+        try {
+          webmap.layers.addMany([skotselLayer, trackLayer, pinsLayer, statusLayer]);
+        } catch(e) {}
+
         redrawTrack();
         redrawPins();
         hideSplash();
@@ -639,6 +657,10 @@
 
       function redrawPins() {
         try {
+          // Säkerhetsnät: se till att vårt nållager alltid ligger överst,
+          // även om något annat lager skulle läggas till senare.
+          try { webmap.reorder(pinsLayer, webmap.layers.length - 1); } catch(e2) {}
+          try { webmap.reorder(statusLayer, webmap.layers.length - 1); } catch(e2) {}
           pinsLayer.removeAll();
 
           for (var j = 0; j < pins.length; j++) {
